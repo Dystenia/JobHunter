@@ -2,10 +2,12 @@ from __future__ import annotations
 import sys
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog,
-    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel)
+    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget)
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, save_profile, Profile
 from .theme import DARK_STYLESHEET
+from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets
+from .core import Base
 
 class JobDialog(QDialog):
     def __init__(self, parent=None):
@@ -49,6 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.engine = database()
+        Base.metadata.create_all(self.engine)
         self.setWindowTitle("JobHunter — Application Studio")
         self.resize(1180, 720)
         root = QWidget()
@@ -71,7 +74,7 @@ class MainWindow(QMainWindow):
             self.stats.append(label)
         layout.addLayout(stats)
         bar = QHBoxLayout()
-        for label, callback in [("Profil", self.edit_profile), ("Stelle hinzufügen", self.new_job),
+        for label, callback in [("Profil", self.edit_profile), ("CV importieren", self.import_cv), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
                                 ("Beworben", lambda: self.change_status("applied")),
                                 ("Verwerfen", lambda: self.change_status("rejected")),
@@ -104,6 +107,79 @@ class MainWindow(QMainWindow):
         for row, values in enumerate(rows):
             for col, value in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem(str(value)))
+
+    def import_cv(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Lebenslauf oder Nachweis auswählen", "",
+            "Dokumente (*.pdf *.docx *.txt *.png *.jpg *.jpeg *.tif *.tiff *.bmp)")
+        if not path:
+            return
+        try:
+            text, method = extract_document(path)
+            if not text.strip():
+                QMessageBox.warning(self, "Import", "Kein Text erkannt. Original bleibt unverändert.")
+                return
+            preview = QDialog(self)
+            preview.setWindowTitle("Import prüfen — noch nicht als Qualifikation bestätigt")
+            preview.resize(760, 540)
+            layout = QVBoxLayout(preview)
+            layout.addWidget(QLabel("Erkannter Text — bitte prüfen und ggf. korrigieren:"))
+            editor = QTextEdit()
+            editor.setPlainText(text)
+            layout.addWidget(editor)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save |
+                                       QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(preview.accept)
+            buttons.rejected.connect(preview.reject)
+            layout.addWidget(buttons)
+            if preview.exec() == QDialog.DialogCode.Accepted:
+                save_document(self.engine, path, editor.toPlainText(), method)
+                QMessageBox.information(self, "Importiert", "Text lokal gespeichert. Profil wurde nicht automatisch verändert.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Importfehler", str(exc))
+
+    def snippets(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Textbaustein-Bibliothek")
+        dialog.resize(760, 560)
+        layout = QVBoxLayout(dialog)
+        items = QListWidget()
+        entries = list_snippets(self.engine)
+        for _, title, category, _ in entries:
+            items.addItem(f"[{category}] {title}")
+        layout.addWidget(items)
+        title = QLineEdit()
+        title.setPlaceholderText("Titel des neuen Textbausteins")
+        category = QLineEdit()
+        category.setPlaceholderText("Kategorie, z.B. IT, Management, Motivation")
+        content = QTextEdit()
+        content.setPlaceholderText("Formulierung eingeben ...")
+        layout.addWidget(title)
+        layout.addWidget(category)
+        layout.addWidget(content)
+        def show_selected(index):
+            if index >= 0:
+                _, t, c, body = entries[index]
+                title.setText(t)
+                category.setText(c)
+                content.setPlainText(body)
+        items.currentRowChanged.connect(show_selected)
+        def save_new():
+            try:
+                save_snippet(self.engine, title.text(), category.text(), content.toPlainText())
+                entries[:] = list_snippets(self.engine)
+                items.clear()
+                for _, t, c, _ in entries:
+                    items.addItem(f"[{c}] {t}")
+                title.clear()
+                category.clear()
+                content.clear()
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Eingabe", str(exc))
+        save_button = QPushButton("Als neuen Textbaustein speichern")
+        save_button.clicked.connect(save_new)
+        layout.addWidget(save_button)
+        dialog.exec()
 
     def edit_profile(self):
         dialog = ProfileDialog(self.engine, self)
