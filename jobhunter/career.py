@@ -77,3 +77,23 @@ def list_snippets(engine):
     with Session(engine) as session:
         return [(s.id, s.title, s.category, s.content)
                 for s in session.scalars(select(TextSnippet).order_by(TextSnippet.id.desc()))]
+
+def update_snippet(engine, snippet_id: int, title: str, category: str, content: str):
+    if not title.strip() or not content.strip():
+        raise ValueError("Titel und Text dürfen nicht leer sein")
+    with Session(engine) as session:
+        snippet = session.get(TextSnippet, snippet_id)
+        if snippet is None:
+            raise ValueError("Textbaustein nicht gefunden")
+        snippet.title = title.strip()
+        snippet.category = category.strip() or "Allgemein"
+        snippet.content = content
+        session.commit()
+
+def delete_snippet(engine, snippet_id: int):
+    with Session(engine) as session:
+        snippet = session.get(TextSnippet, snippet_id)
+        if snippet is None:
+            raise ValueError("Textbaustein nicht gefunden")
+        session.delete(snippet)
+        session.commit()
