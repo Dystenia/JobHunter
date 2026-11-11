@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, save_profile, Profile
 from .theme import DARK_STYLESHEET
-from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets
+from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet
 from .core import Base
 
 class JobDialog(QDialog):
@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
             self.stats.append(label)
         layout.addLayout(stats)
         bar = QHBoxLayout()
-        for label, callback in [("Profil", self.edit_profile), ("CV importieren", self.import_cv), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
+        for label, callback in [("Profil", self.edit_profile), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
                                 ("Beworben", lambda: self.change_status("applied")),
                                 ("Verwerfen", lambda: self.change_status("rejected")),
@@ -138,6 +138,24 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "Importfehler", str(exc))
 
+    def documents(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Dokumentenarchiv — importierte Quellen")
+        dialog.resize(850, 590)
+        layout = QVBoxLayout(dialog)
+        items = QListWidget()
+        entries = list_documents(self.engine)
+        for doc_id, filename, method, _ in entries:
+            items.addItem(f"#{doc_id}  {filename}  [{method}]")
+        layout.addWidget(items)
+        preview = QTextEdit()
+        preview.setReadOnly(True)
+        layout.addWidget(preview)
+        def show_document(index):
+            preview.setPlainText(entries[index][3] if 0 <= index < len(entries) else "")
+        items.currentRowChanged.connect(show_document)
+        dialog.exec()
+
     def snippets(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Textbaustein-Bibliothek")
@@ -176,9 +194,42 @@ class MainWindow(QMainWindow):
                 content.clear()
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Eingabe", str(exc))
+        def refresh_items():
+            entries[:] = list_snippets(self.engine)
+            items.clear()
+            for _, t, c, _ in entries:
+                items.addItem(f"[{c}] {t}")
+        def save_existing():
+            index = items.currentRow()
+            if index < 0:
+                QMessageBox.information(dialog, "Auswahl", "Bitte zuerst einen Textbaustein auswählen.")
+                return
+            try:
+                update_snippet(self.engine, entries[index][0], title.text(), category.text(), content.toPlainText())
+                refresh_items()
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Eingabe", str(exc))
+        def remove_existing():
+            index = items.currentRow()
+            if index < 0:
+                return
+            if QMessageBox.question(dialog, "Löschen", "Diesen Textbaustein wirklich löschen?") != QMessageBox.StandardButton.Yes:
+                return
+            delete_snippet(self.engine, entries[index][0])
+            refresh_items()
+            title.clear()
+            category.clear()
+            content.clear()
         save_button = QPushButton("Als neuen Textbaustein speichern")
         save_button.clicked.connect(save_new)
         layout.addWidget(save_button)
+        edit_button = QPushButton("Ausgewählten Baustein aktualisieren")
+        edit_button.clicked.connect(save_existing)
+        layout.addWidget(edit_button)
+        delete_button = QPushButton("Ausgewählten Baustein löschen")
+        delete_button.setObjectName("pink")
+        delete_button.clicked.connect(remove_existing)
+        layout.addWidget(delete_button)
         dialog.exec()
 
     def edit_profile(self):
