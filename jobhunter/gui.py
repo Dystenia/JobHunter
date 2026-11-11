@@ -1,12 +1,14 @@
 from __future__ import annotations
 import sys
+from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog,
     QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox)
+from PySide6.QtGui import QIcon
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, save_profile, Profile
 from .theme import DARK_STYLESHEET
-from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet
+from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet, update_document, delete_document
 from .core import Base
 from .entries import CareerEntry, KINDS, entries, save_entry, remove_entry
 
@@ -54,6 +56,7 @@ class MainWindow(QMainWindow):
         self.engine = database()
         Base.metadata.create_all(self.engine)
         self.setWindowTitle("JobHunter — Application Studio")
+        self.setWindowIcon(QApplication.instance().windowIcon())
         self.resize(1180, 720)
         root = QWidget()
         self.setCentralWidget(root)
@@ -217,20 +220,103 @@ class MainWindow(QMainWindow):
 
     def documents(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Dokumentenarchiv — importierte Quellen")
-        dialog.resize(850, 590)
+        dialog.setWindowTitle("JobHunter | Dokumentenarchiv")
+        dialog.resize(1050, 670)
         layout = QVBoxLayout(dialog)
+        heading = QLabel("◈  DOKUMENTENARCHIV")
+        heading.setObjectName("hero")
+        layout.addWidget(heading)
+        hint = QLabel("Lebensläufe, Zeugnisse und Nachweise · lokal gespeichert · keine automatische Profilfreigabe")
+        hint.setObjectName("subtitle")
+        layout.addWidget(hint)
+        actions = QHBoxLayout()
+        upload = QPushButton("＋ Dokument importieren")
+        upload.setObjectName("primary")
+        edit = QPushButton("Text speichern")
+        remove = QPushButton("Dokument löschen")
+        remove.setObjectName("pink")
+        actions.addWidget(upload)
+        actions.addWidget(edit)
+        actions.addWidget(remove)
+        layout.addLayout(actions)
+        body = QHBoxLayout()
         items = QListWidget()
-        entries = list_documents(self.engine)
-        for doc_id, filename, method, _ in entries:
-            items.addItem(f"#{doc_id}  {filename}  [{method}]")
-        layout.addWidget(items)
+        items.setMinimumWidth(310)
+        body.addWidget(items, 1)
         preview = QTextEdit()
-        preview.setReadOnly(True)
-        layout.addWidget(preview)
-        def show_document(index):
-            preview.setPlainText(entries[index][3] if 0 <= index < len(entries) else "")
-        items.currentRowChanged.connect(show_document)
+        preview.setPlaceholderText("Wähle links ein Dokument aus. Hier erscheint der erkannte Text zur Korrektur.")
+        body.addWidget(preview, 2)
+        layout.addLayout(body)
+        status = QLabel()
+        status.setObjectName("subtitle")
+        layout.addWidget(status)
+        records = []
+        def refresh_docs(select_id=None):
+            records[:] = list_documents(self.engine)
+            items.clear()
+            for doc_id, filename, method, _ in records:
+                items.addItem(f"▣  {filename}   ·   {method.upper()}   #{doc_id}")
+            if not records:
+                status.setText("Noch keine Dokumente vorhanden. Starte mit ＋ Dokument importieren.")
+                preview.clear()
+                preview.setReadOnly(True)
+            else:
+                status.setText(f"{len(records)} Dokument(e) gespeichert · Texte sind bearbeitbar, aber nicht als Qualifikationen bestätigt.")
+                preview.setReadOnly(False)
+                if select_id is not None:
+                    for i, record in enumerate(records):
+                        if record[0] == select_id:
+                            items.setCurrentRow(i)
+                            break
+        def show_doc(index):
+            preview.setPlainText(records[index][3] if 0 <= index < len(records) else "")
+        items.currentRowChanged.connect(show_doc)
+        def upload_doc():
+            paths, _ = QFileDialog.getOpenFileNames(
+                dialog, "Dokumente importieren", "",
+                "Dokumente (*.pdf *.docx *.txt *.png *.jpg *.jpeg *.tif *.tiff *.bmp)")
+            if not paths:
+                return
+            imported = 0
+            errors = []
+            for path in paths:
+                try:
+                    text, method = extract_document(path)
+                    if not text.strip():
+                        raise ValueError("Kein Text erkannt")
+                    save_document(self.engine, path, text, method)
+                    imported += 1
+                except Exception as exc:
+                    errors.append(f"{Path(path).name}: {exc}")
+            refresh_docs()
+            if errors:
+                QMessageBox.warning(dialog, "Import", "\\n".join(errors))
+            if imported:
+                status.setText(f"{imported} Dokument(e) importiert. Bitte Text kontrollieren.")
+        def save_text():
+            index = items.currentRow()
+            if index < 0 or index >= len(records):
+                QMessageBox.information(dialog, "Auswahl", "Bitte zuerst ein Dokument auswählen.")
+                return
+            try:
+                doc_id = records[index][0]
+                update_document(self.engine, doc_id, preview.toPlainText())
+                refresh_docs(doc_id)
+                status.setText("Änderungen gespeichert. Qualifikationen bleiben unbestätigt.")
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Speichern", str(exc))
+        def remove_doc():
+            index = items.currentRow()
+            if index < 0 or index >= len(records):
+                return
+            if QMessageBox.question(dialog, "Löschen", "Dieses importierte Dokument wirklich aus dem Archiv löschen?") != QMessageBox.StandardButton.Yes:
+                return
+            delete_document(self.engine, records[index][0])
+            refresh_docs()
+        upload.clicked.connect(upload_doc)
+        edit.clicked.connect(save_text)
+        remove.clicked.connect(remove_doc)
+        refresh_docs()
         dialog.exec()
 
     def snippets(self):
@@ -339,6 +425,9 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
+    icon_path = Path(__file__).resolve().parent.parent / 'jobhunter.ico'
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyleSheet(DARK_STYLESHEET)
     window = MainWindow()
     window.show()
