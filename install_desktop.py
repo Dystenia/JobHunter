@@ -79,7 +79,7 @@ def main():
     pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if not pythonw.exists():
         raise SystemExit("Python-Umgebung fehlt. Zuerst .venv installieren.")
-    icon = create_icon()
+    icon = ICON if ICON.exists() else create_icon()
     desktop = desktop_path()
     desktop.mkdir(parents=True, exist_ok=True)
     link = desktop / "JobHunter.lnk"
@@ -89,7 +89,7 @@ def main():
         "$s = New-Object -ComObject WScript.Shell; "
         "$l = $s.CreateShortcut($env:JOBHUNTER_LINK); "
         "$l.TargetPath = $env:JOBHUNTER_PYTHONW; "
-        "$l.Arguments = '"' + $env:JOBHUNTER_MAIN + '"'; "
+        "$l.Arguments = ([char]34) + $env:JOBHUNTER_MAIN + ([char]34); "
         "$l.WorkingDirectory = $env:JOBHUNTER_ROOT; "
         "$l.IconLocation = $env:JOBHUNTER_ICON; "
         "$l.Description = 'JobHunter Application Studio'; "
