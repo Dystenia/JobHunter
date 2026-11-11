@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel)
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, save_profile, Profile
+from .theme import DARK_STYLESHEET
 
 class JobDialog(QDialog):
     def __init__(self, parent=None):
@@ -49,11 +50,26 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.engine = database()
         self.setWindowTitle("JobHunter — Application Studio")
-        self.resize(1050, 650)
+        self.resize(1180, 720)
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
-        layout.addWidget(QLabel("JobHunter | Lokale Stellenverwaltung & Matching"))
+        layout.setContentsMargins(24, 20, 24, 24)
+        layout.setSpacing(14)
+        hero = QLabel("⚡ JOBHUNTER  /  APPLICATION STUDIO")
+        hero.setObjectName("hero")
+        layout.addWidget(hero)
+        subtitle = QLabel("DEIN KARRIERE-RADAR  •  Lokale Stellenverwaltung & Matching")
+        subtitle.setObjectName("subtitle")
+        layout.addWidget(subtitle)
+        stats = QHBoxLayout()
+        self.stats = []
+        for _ in range(3):
+            label = QLabel()
+            label.setObjectName("stat")
+            stats.addWidget(label)
+            self.stats.append(label)
+        layout.addLayout(stats)
         bar = QHBoxLayout()
         for label, callback in [("Profil", self.edit_profile), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
@@ -62,6 +78,12 @@ class MainWindow(QMainWindow):
                                 ("Aktualisieren", self.refresh)]:
             button = QPushButton(label)
             button.clicked.connect(callback)
+            if label == 'Stelle hinzufügen':
+                button.setObjectName('primary')
+            elif label == 'Profil':
+                button.setObjectName('purple')
+            elif label == 'Verwerfen':
+                button.setObjectName('pink')
             bar.addWidget(button)
         layout.addLayout(bar)
         self.table = QTableWidget(0, 6)
@@ -75,6 +97,10 @@ class MainWindow(QMainWindow):
     def refresh(self):
         rows = list_jobs(self.engine)
         self.table.setRowCount(len(rows))
+        self.table.setAlternatingRowColors(True)
+        self.stats[0].setText(f"◈  {len(rows)}  GEFUNDENE JOBS")
+        self.stats[1].setText(f"✦  {sum(1 for r in rows if r[3] >= 70)}  MATCHES ≥ 70%")
+        self.stats[2].setText(f"➤  {sum(1 for r in rows if r[4] == 'queued')}  IN WARTESCHLANGE")
         for row, values in enumerate(rows):
             for col, value in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem(str(value)))
@@ -108,6 +134,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyle('Fusion')
+    app.setStyleSheet(DARK_STYLESHEET)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
