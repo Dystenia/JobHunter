@@ -2,12 +2,13 @@ from __future__ import annotations
 import sys
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog,
-    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget)
+    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox)
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, save_profile, Profile
 from .theme import DARK_STYLESHEET
 from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet
 from .core import Base
+from .entries import CareerEntry, KINDS, entries, save_entry, remove_entry
 
 class JobDialog(QDialog):
     def __init__(self, parent=None):
@@ -74,7 +75,7 @@ class MainWindow(QMainWindow):
             self.stats.append(label)
         layout.addLayout(stats)
         bar = QHBoxLayout()
-        for label, callback in [("Profil", self.edit_profile), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
+        for label, callback in [("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
                                 ("Beworben", lambda: self.change_status("applied")),
                                 ("Verwerfen", lambda: self.change_status("rejected")),
@@ -107,6 +108,82 @@ class MainWindow(QMainWindow):
         for row, values in enumerate(rows):
             for col, value in enumerate(values):
                 self.table.setItem(row, col, QTableWidgetItem(str(value)))
+
+    def career_entries(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Career Profile Studio — bestätigte Karriere-Daten")
+        dialog.resize(860, 680)
+        layout = QVBoxLayout(dialog)
+        items = QListWidget()
+        records = entries(self.engine)
+        layout.addWidget(QLabel("Nur bestätigte Einträge dürfen später für Bewerbungen verwendet werden."))
+        layout.addWidget(items)
+        form = QFormLayout()
+        kind = QComboBox()
+        kind.addItems(KINDS)
+        title = QLineEdit()
+        org = QLineEdit()
+        period = QLineEdit()
+        period.setPlaceholderText("z.B. 2020–2024")
+        details = QTextEdit()
+        verified = QCheckBox("Von mir geprüft und bestätigt")
+        for label, widget in [("Kategorie", kind), ("Bezeichnung", title),
+                              ("Arbeitgeber / Institution", org), ("Zeitraum", period),
+                              ("Beschreibung", details), ("Freigabe", verified)]:
+            form.addRow(label, widget)
+        layout.addLayout(form)
+        def reload():
+            records[:] = entries(self.engine)
+            items.clear()
+            for row in records:
+                items.addItem(f"{'✓' if row[6] else '○'}  {row[1]} | {row[2]} | {row[3]}")
+        def select(index):
+            if index < 0 or index >= len(records):
+                return
+            record = records[index]
+            kind.setCurrentText(record[1])
+            title.setText(record[2])
+            org.setText(record[3])
+            period.setText(record[4])
+            details.setPlainText(record[5])
+            verified.setChecked(record[6])
+        items.currentRowChanged.connect(select)
+        def clear():
+            items.clearSelection()
+            items.setCurrentRow(-1)
+            kind.setCurrentIndex(0)
+            title.clear()
+            org.clear()
+            period.clear()
+            details.clear()
+            verified.setChecked(False)
+        def persist():
+            index = items.currentRow()
+            entry_id = records[index][0] if 0 <= index < len(records) else None
+            try:
+                save_entry(self.engine, kind.currentText(), title.text(), org.text(),
+                           period.text(), details.toPlainText(), verified.isChecked(), entry_id)
+                reload()
+                clear()
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Eingabe", str(exc))
+        def delete():
+            index = items.currentRow()
+            if index < 0 or index >= len(records):
+                return
+            if QMessageBox.question(dialog, "Löschen", "Karriereeintrag löschen?") != QMessageBox.StandardButton.Yes:
+                return
+            remove_entry(self.engine, records[index][0])
+            reload()
+            clear()
+        buttons = QHBoxLayout()
+        for label, callback in [("Neu", clear), ("Speichern", persist), ("Löschen", delete)]:
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+        reload()
+        dialog.exec()
 
     def import_cv(self):
         path, _ = QFileDialog.getOpenFileName(
