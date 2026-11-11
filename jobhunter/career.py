@@ -97,3 +97,21 @@ def delete_snippet(engine, snippet_id: int):
             raise ValueError("Textbaustein nicht gefunden")
         session.delete(snippet)
         session.commit()
+
+def update_document(engine, document_id: int, text: str):
+    if not text.strip():
+        raise ValueError("Dokumenttext darf nicht leer sein")
+    with Session(engine) as session:
+        doc = session.get(CareerDocument, document_id)
+        if doc is None:
+            raise ValueError("Dokument nicht gefunden")
+        doc.extracted_text = text
+        session.commit()
+
+def delete_document(engine, document_id: int):
+    with Session(engine) as session:
+        doc = session.get(CareerDocument, document_id)
+        if doc is None:
+            raise ValueError("Dokument nicht gefunden")
+        session.delete(doc)
+        session.commit()
