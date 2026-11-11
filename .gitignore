@@ -7,3 +7,10 @@ __pycache__/
 .env
 outputs/
 private/
+*.pdf
+*.docx
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
