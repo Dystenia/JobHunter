@@ -14,7 +14,7 @@ def test_message_with_attachment(tmp_path):
 
 def test_reject_header_injection():
     with pytest.raises(ValueError):
-        build_message("sender@example.org", "jobs@example.org", "Hi\\r\\nBcc: attacker@example.org", "Hello")
+        build_message("sender@example.org", "jobs@example.org", "Hi\r\nBcc: attacker@example.org", "Hello")
 
 
 def test_mail_audit(tmp_path):
