@@ -11,6 +11,7 @@ from .theme import DARK_STYLESHEET
 from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet, update_document, delete_document
 from .core import Base
 from .entries import CareerEntry, KINDS, entries, save_entry, remove_entry
+from .mailer import MailLog, load_settings, save_settings, send_mail, log_mail, mail_history
 
 class JobDialog(QDialog):
     def __init__(self, parent=None):
@@ -78,7 +79,7 @@ class MainWindow(QMainWindow):
             self.stats.append(label)
         layout.addLayout(stats)
         bar = QHBoxLayout()
-        for label, callback in [("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
+        for label, callback in [("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("E-Mail", self.mail_studio), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
                                 ("Beworben", lambda: self.change_status("applied")),
                                 ("Verwerfen", lambda: self.change_status("rejected")), ("Papierkorb", self.rejected_jobs),
@@ -464,6 +465,125 @@ class MainWindow(QMainWindow):
                 self.refresh()
             except ValueError as exc:
                 QMessageBox.warning(self, "Eingabefehler", str(exc))
+
+    def mail_studio(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("JobHunter | Sicherer SMTP-Mailer")
+        dialog.resize(900, 760)
+        layout = QVBoxLayout(dialog)
+        heading = QLabel("✉  APPLICATION MAILER")
+        heading.setObjectName("hero")
+        layout.addWidget(heading)
+        settings = load_settings()
+        config = QFormLayout()
+        host = QLineEdit(str(settings.get("host", "")))
+        port = QLineEdit(str(settings.get("port", 587)))
+        security = QComboBox()
+        security.addItems(["STARTTLS", "SSL/TLS"])
+        security.setCurrentText(settings.get("security", "STARTTLS"))
+        username = QLineEdit(settings.get("username", ""))
+        sender = QLineEdit(settings.get("sender", ""))
+        password = QLineEdit()
+        password.setEchoMode(QLineEdit.EchoMode.Password)
+        password.setPlaceholderText("Leer lassen, um gespeichertes Passwort beizubehalten")
+        signature = QTextEdit(settings.get("signature", ""))
+        signature.setMaximumHeight(85)
+        for label, widget in [("SMTP-Host", host), ("Port", port), ("Verschlüsselung", security),
+                              ("Benutzername", username), ("Absenderadresse", sender),
+                              ("SMTP-Passwort / App-Passwort", password), ("Signatur", signature)]:
+            config.addRow(label, widget)
+        layout.addLayout(config)
+        def current_settings():
+            return dict(host=host.text().strip(), port=port.text().strip(),
+                        security=security.currentText(), username=username.text().strip(),
+                        sender=sender.text().strip(), signature=signature.toPlainText())
+        def store():
+            try:
+                save_settings(current_settings(), password.text() or None)
+                password.clear()
+                QMessageBox.information(dialog, "Gespeichert", "SMTP-Konfiguration gespeichert. Passwort liegt im Betriebssystem-Schlüsselspeicher.")
+            except Exception as exc:
+                QMessageBox.warning(dialog, "Konfiguration", str(exc))
+        save_button = QPushButton("SMTP-Einstellungen und Signatur speichern")
+        save_button.clicked.connect(store)
+        layout.addWidget(save_button)
+        layout.addWidget(QLabel("NACHRICHT  •  Empfänger und Anhänge vor Versand prüfen"))
+        form = QFormLayout()
+        recipient = QLineEdit()
+        subject = QLineEdit()
+        body = QTextEdit()
+        body.setPlaceholderText("Bewerbungstext eingeben ...")
+        body.setMinimumHeight(110)
+        form.addRow("An", recipient)
+        form.addRow("Betreff", subject)
+        form.addRow("Nachricht", body)
+        layout.addLayout(form)
+        attachments = QListWidget()
+        attachments.setMaximumHeight(90)
+        layout.addWidget(attachments)
+        attachment_paths = []
+        controls = QHBoxLayout()
+        def attach():
+            paths, _ = QFileDialog.getOpenFileNames(dialog, "Anhänge auswählen")
+            for path in paths:
+                if path not in attachment_paths:
+                    attachment_paths.append(path)
+                    attachments.addItem(Path(path).name)
+        def detach():
+            index = attachments.currentRow()
+            if index >= 0:
+                attachment_paths.pop(index)
+                attachments.takeItem(index)
+        for label, callback in [("＋ Anhänge auswählen", attach), ("Anhang entfernen", detach)]:
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            controls.addWidget(button)
+        layout.addLayout(controls)
+        def compose():
+            text = body.toPlainText().rstrip()
+            sig = signature.toPlainText().strip()
+            return text + ("\\n\\n" + sig if sig else "")
+        def send():
+            from .mailer import build_message
+            from PySide6.QtCore import QTimer
+            try:
+                cfg = current_settings()
+                message = build_message(cfg["sender"], recipient.text(), subject.text(),
+                                        compose(), attachment_paths)
+                summary = (f"Von: {cfg['sender']}\\nAn: {recipient.text()}\\n"
+                           f"Betreff: {subject.text()}\\nAnhänge: "
+                           f"{', '.join(Path(p).name for p in attachment_paths) or 'keine'}"
+                           f"\\n\\n{compose()}")
+                preview = QMessageBox.question(dialog, "Versand bestätigen", summary,
+                                               QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                               QMessageBox.StandardButton.No)
+                if preview != QMessageBox.StandardButton.Yes:
+                    return
+                send_button.setEnabled(False)
+                QApplication.setOverrideCursor(__import__("PySide6.QtCore", fromlist=["Qt"]).Qt.CursorShape.WaitCursor)
+                try:
+                    send_mail(cfg, recipient.text(), subject.text(), compose(), attachment_paths)
+                finally:
+                    QApplication.restoreOverrideCursor()
+                    send_button.setEnabled(True)
+                log_mail(self.engine, recipient.text(), subject.text(), "sent")
+                QMessageBox.information(dialog, "Versendet", "SMTP-Server hat die Nachricht angenommen.")
+            except Exception as exc:
+                # Avoid persisting SMTP server responses: they can contain sensitive details.
+                log_mail(self.engine, recipient.text(), subject.text(), "failed", type(exc).__name__)
+                QMessageBox.warning(dialog, "Versand fehlgeschlagen", f"{type(exc).__name__}: {exc}")
+        send_button = QPushButton("✉ Nachricht prüfen und senden")
+        send_button.setObjectName("primary")
+        send_button.clicked.connect(send)
+        layout.addWidget(send_button)
+        history = mail_history(self.engine)
+        layout.addWidget(QLabel("LETZTE VERSANDVERSUCHE"))
+        logview = QListWidget()
+        logview.setMaximumHeight(90)
+        for date, to, subj, status in history:
+            logview.addItem(f"{date[:19]}  |  {status.upper()}  |  {to}  |  {subj}")
+        layout.addWidget(logview)
+        dialog.exec()
 
     def rejected_jobs(self):
         dialog = QDialog(self)
