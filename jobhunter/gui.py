@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
             for name, callback in children:
                 child = QTreeWidgetItem([name])
                 parent.addChild(child)
-                self.nav_actions[id(child)] = callback
+                self.nav_actions[name] = callback
                 child.setData(0, Qt.ItemDataRole.UserRole, name)
             parent.setExpanded(True)
             return parent
@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
             ("Als beworben markieren", lambda: self.change_status("applied")),
         ])
         self.navigation.itemClicked.connect(
-            lambda item, column: self.nav_actions.get(id(item), lambda: None)()
+            lambda item, column: self.nav_actions.get(item.data(0, Qt.ItemDataRole.UserRole), lambda: None)()
             if item.parent() is not None else None
         )
         self.sidebar_collapsed = False
