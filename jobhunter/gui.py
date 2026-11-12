@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox)
 from PySide6.QtGui import QIcon
 from sqlalchemy.orm import Session
-from .core import database, add_job, list_jobs, set_status, save_profile, Profile
+from .core import database, add_job, list_jobs, set_status, list_rejected, list_status_events, save_profile, Profile
 from .theme import DARK_STYLESHEET
 from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet, update_document, delete_document
 from .core import Base
@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         for label, callback in [("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
                                 ("Beworben", lambda: self.change_status("applied")),
-                                ("Verwerfen", lambda: self.change_status("rejected")),
+                                ("Verwerfen", lambda: self.change_status("rejected")), ("Papierkorb", self.rejected_jobs),
                                 ("Aktualisieren", self.refresh)]:
             button = QPushButton(label)
             button.clicked.connect(callback)
@@ -464,6 +464,48 @@ class MainWindow(QMainWindow):
                 self.refresh()
             except ValueError as exc:
                 QMessageBox.warning(self, "Eingabefehler", str(exc))
+
+    def rejected_jobs(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("JobHunter | Verworfene Stellen")
+        dialog.resize(820, 530)
+        layout = QVBoxLayout(dialog)
+        heading = QLabel("◈  PAPIERKORB / VERWORFENE STELLEN")
+        heading.setObjectName("hero")
+        layout.addWidget(heading)
+        layout.addWidget(QLabel("Verworfene Stellen bleiben gespeichert und können wiederhergestellt werden."))
+        items = QListWidget()
+        layout.addWidget(items)
+        history = QTextEdit()
+        history.setReadOnly(True)
+        layout.addWidget(history)
+        records = list_rejected(self.engine)
+        for job_id, title, company, _ in records:
+            items.addItem(f"#{job_id}  {title}  |  {company}")
+        if not records:
+            history.setPlainText("Keine verworfenen Stellen vorhanden.")
+        def show_history(index):
+            if index < 0 or index >= len(records):
+                history.clear()
+                return
+            events = list_status_events(self.engine, records[index][0])
+            history.setPlainText("\\n".join(
+                f"{date}: {old} → {new}" for old, new, date in events
+            ) or "Keine Statusänderungen protokolliert.")
+        items.currentRowChanged.connect(show_history)
+        def restore():
+            index = items.currentRow()
+            if index < 0 or index >= len(records):
+                QMessageBox.information(dialog, "Auswahl", "Bitte eine Stelle auswählen.")
+                return
+            set_status(self.engine, records[index][0], "new")
+            dialog.accept()
+            self.refresh()
+        button = QPushButton("↩ Ausgewählte Stelle wiederherstellen")
+        button.setObjectName("primary")
+        button.clicked.connect(restore)
+        layout.addWidget(button)
+        dialog.exec()
 
     def change_status(self, status):
         row = self.table.currentRow()
