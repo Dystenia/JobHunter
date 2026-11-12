@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog,
-    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox, QScrollArea)
+    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox, QScrollArea, QSizePolicy, QGridLayout)
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
 from sqlalchemy.orm import Session
@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
         Base.metadata.create_all(self.engine)
         self.setWindowTitle("JobHunter — Application Studio")
         self.setWindowIcon(QApplication.instance().windowIcon())
+        self.setMinimumSize(420, 320)
         self.resize(1180, 720)
         root = QWidget()
         self.setCentralWidget(root)
@@ -79,12 +80,14 @@ class MainWindow(QMainWindow):
             stats.addWidget(label)
             self.stats.append(label)
         layout.addLayout(stats)
-        bar = QHBoxLayout()
-        for label, callback in [("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("E-Mail", self.mail_studio), ("Stelle hinzufügen", self.new_job),
+        bar = QGridLayout()
+        bar.setHorizontalSpacing(6)
+        bar.setVerticalSpacing(6)
+        for index, (label, callback) in enumerate([("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("E-Mail", self.mail_studio), ("Stelle hinzufügen", self.new_job),
                                 ("In Warteschlange", lambda: self.change_status("queued")),
                                 ("Beworben", lambda: self.change_status("applied")),
                                 ("Verwerfen", lambda: self.change_status("rejected")), ("Papierkorb", self.rejected_jobs),
-                                ("Aktualisieren", self.refresh)]:
+                                ("Aktualisieren", self.refresh)]):
             button = QPushButton(label)
             button.clicked.connect(callback)
             if label == 'Stelle hinzufügen':
@@ -93,9 +96,12 @@ class MainWindow(QMainWindow):
                 button.setObjectName('purple')
             elif label == 'Verwerfen':
                 button.setObjectName('pink')
-            bar.addWidget(button)
+            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            button.setMinimumWidth(0)
+            bar.addWidget(button, index // 3, index % 3)
         layout.addLayout(bar)
         self.table = QTableWidget(0, 6)
+        self.table.setMinimumSize(0, 0)
         self.table.setHorizontalHeaderLabels(["ID", "Stelle", "Unternehmen", "Match %", "Status", "URL"])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -471,13 +477,17 @@ class MainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("JobHunter | Application Mailer")
         dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
+        dialog.setMinimumSize(420, 320)
         screen = QApplication.primaryScreen().availableGeometry()
         dialog.resize(min(950, screen.width() - 80), min(780, screen.height() - 80))
         outer = QVBoxLayout(dialog)
         scroll = QScrollArea()
+        scroll.setMinimumSize(0, 0)
+        scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         scroll.setWidgetResizable(True)
         outer.addWidget(scroll)
         panel = QWidget()
+        panel.setMinimumSize(0, 0)
         scroll.setWidget(panel)
         layout = QVBoxLayout(panel)
         heading = QLabel("✉  APPLICATION MAILER")
@@ -559,6 +569,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(form)
         attachments = QListWidget()
         attachments.setMinimumHeight(90)
+        attachments.setMinimumWidth(0)
         layout.addWidget(attachments)
         attachment_paths = []
         controls = QHBoxLayout()
