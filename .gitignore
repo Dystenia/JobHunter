@@ -14,3 +14,4 @@ private/
 *.jpeg
 *.tif
 *.tiff
+smtp_settings.json
