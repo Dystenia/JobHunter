@@ -21,6 +21,14 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(30), default="new")
     created_at: Mapped[str] = mapped_column(String(40), default=lambda: datetime.now(timezone.utc).isoformat())
 
+class JobStatusEvent(Base):
+    __tablename__ = "job_status_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    previous_status: Mapped[str] = mapped_column(String(30))
+    new_status: Mapped[str] = mapped_column(String(30))
+    changed_at: Mapped[str] = mapped_column(String(40), default=lambda: datetime.now(timezone.utc).isoformat())
+
 class Profile(Base):
     __tablename__ = "profiles"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -84,5 +92,18 @@ def set_status(engine, job_id: int, status: str):
         job = session.get(Job, job_id)
         if job is None:
             raise ValueError("Stelle nicht gefunden")
+        if job.status == status:
+            return
+        session.add(JobStatusEvent(job_id=job_id, previous_status=job.status, new_status=status))
         job.status = status
         session.commit()
+
+def list_rejected(engine):
+    with Session(engine) as session:
+        return [(j.id, j.title, j.company, j.url)
+                for j in session.scalars(select(Job).where(Job.status == "rejected").order_by(Job.id.desc()))]
+
+def list_status_events(engine, job_id: int):
+    with Session(engine) as session:
+        return [(e.previous_status, e.new_status, e.changed_at)
+                for e in session.scalars(select(JobStatusEvent).where(JobStatusEvent.job_id == job_id).order_by(JobStatusEvent.id.desc()))]
