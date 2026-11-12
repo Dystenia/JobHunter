@@ -25,11 +25,11 @@ class MailLog(Base):
 
 def load_settings():
     if not SETTINGS_PATH.is_file():
-        return {"host": "", "port": 587, "security": "STARTTLS", "username": "", "sender": "", "signature": ""}
+        return {"host": "", "port": 587, "security": "STARTTLS", "username": "", "sender": "", "signature": "", "verified": False}
     return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
 
 def save_settings(settings, password=None):
-    allowed = ("host", "port", "security", "username", "sender", "signature")
+    allowed = ("host", "port", "security", "username", "sender", "signature", "verified")
     data = {k: settings.get(k, "") for k in allowed}
     if data["security"] not in ("STARTTLS", "SSL/TLS"):
         raise ValueError("Ungültige TLS-Einstellung")
