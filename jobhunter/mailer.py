@@ -64,6 +64,32 @@ def build_message(sender, recipient, subject, body, attachments=()):
                                subtype="octet-stream", filename=path.name)
     return message
 
+def test_connection(settings, password=None):
+    host = str(settings.get("host", "")).strip()
+    username = str(settings.get("username", "")).strip()
+    sender = validate_address(str(settings.get("sender", "")))
+    security = settings.get("security", "STARTTLS")
+    port = int(settings.get("port", 587))
+    if not host or not username or not 1 <= port <= 65535 or security not in ("STARTTLS", "SSL/TLS"):
+        raise ValueError("SMTP-Host, Port, Benutzername und TLS-Modus prüfen.")
+    secret = password or keyring.get_password(SERVICE, username)
+    if not secret:
+        raise ValueError("SMTP-Passwort fehlt.")
+    context = ssl.create_default_context()
+    if security == "SSL/TLS":
+        with smtplib.SMTP_SSL(host, port, timeout=15, context=context) as smtp:
+            smtp.login(username, secret)
+    else:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.ehlo()
+            if not smtp.has_extn("starttls"):
+                raise RuntimeError("STARTTLS wird vom Server nicht angeboten.")
+            smtp.starttls(context=context)
+            smtp.ehlo()
+            smtp.login(username, secret)
+    return True
+
+
 def send_mail(settings, recipient, subject, body, attachments=()):
     host = str(settings.get("host", "")).strip()
     username = str(settings.get("username", "")).strip()
