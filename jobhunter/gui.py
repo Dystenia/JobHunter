@@ -3,8 +3,8 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog,
-    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox, QScrollArea, QSizePolicy, QGridLayout)
-from PySide6.QtGui import QIcon
+    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox, QScrollArea, QSizePolicy, QToolBar, QToolButton)
+from PySide6.QtGui import QIcon, QAction
 from PySide6.QtCore import Qt
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, list_rejected, list_status_events, save_profile, Profile
@@ -80,26 +80,50 @@ class MainWindow(QMainWindow):
             stats.addWidget(label)
             self.stats.append(label)
         layout.addLayout(stats)
-        bar = QGridLayout()
-        bar.setHorizontalSpacing(6)
-        bar.setVerticalSpacing(6)
-        for index, (label, callback) in enumerate([("Profil", self.edit_profile), ("Karriere-Daten", self.career_entries), ("CV importieren", self.import_cv), ("Dokumentenarchiv", self.documents), ("Textbausteine", self.snippets), ("E-Mail", self.mail_studio), ("Stelle hinzufügen", self.new_job),
-                                ("In Warteschlange", lambda: self.change_status("queued")),
-                                ("Beworben", lambda: self.change_status("applied")),
-                                ("Verwerfen", lambda: self.change_status("rejected")), ("Papierkorb", self.rejected_jobs),
-                                ("Aktualisieren", self.refresh)]):
-            button = QPushButton(label)
-            button.clicked.connect(callback)
-            if label == 'Stelle hinzufügen':
-                button.setObjectName('primary')
-            elif label == 'Profil':
-                button.setObjectName('purple')
-            elif label == 'Verwerfen':
-                button.setObjectName('pink')
-            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-            button.setMinimumWidth(0)
-            bar.addWidget(button, index // 3, index % 3)
-        layout.addLayout(bar)
+        # Compact native toolbar: menus stay usable even when the window is narrow.
+        toolbar = QToolBar("Aktionen", self)
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        toolbar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
+
+        add_action = QAction("＋ Stelle hinzufügen", self)
+        add_action.triggered.connect(self.new_job)
+        toolbar.addAction(add_action)
+
+        def add_menu(title, items):
+            button = QToolButton(self)
+            button.setText(title)
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            menu = button.menu()
+            if menu is None:
+                from PySide6.QtWidgets import QMenu
+                menu = QMenu(button)
+                button.setMenu(menu)
+            for label, callback in items:
+                action = menu.addAction(label)
+                action.triggered.connect(callback)
+            toolbar.addWidget(button)
+
+        add_menu("Karriere ▾", [
+            ("Profil", self.edit_profile),
+            ("Karriere-Daten", self.career_entries),
+            ("CV importieren", self.import_cv),
+            ("Dokumentenarchiv", self.documents),
+            ("Textbausteine", self.snippets),
+        ])
+        add_menu("Bewerbungen ▾", [
+            ("E-Mail", self.mail_studio),
+            ("In Warteschlange", lambda: self.change_status("queued")),
+            ("Als beworben markieren", lambda: self.change_status("applied")),
+            ("Verwerfen", lambda: self.change_status("rejected")),
+            ("Papierkorb", self.rejected_jobs),
+        ])
+        refresh_action = QAction("⟳ Aktualisieren", self)
+        refresh_action.triggered.connect(self.refresh)
+        toolbar.addAction(refresh_action)
         self.table = QTableWidget(0, 6)
         self.table.setMinimumSize(0, 0)
         self.table.setHorizontalHeaderLabels(["ID", "Stelle", "Unternehmen", "Match %", "Status", "URL"])
