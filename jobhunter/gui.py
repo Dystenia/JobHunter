@@ -3,15 +3,16 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QDialog,
-    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox)
+    QFormLayout, QLineEdit, QTextEdit, QDialogButtonBox, QMessageBox, QLabel, QFileDialog, QListWidget, QComboBox, QCheckBox, QScrollArea)
 from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt
 from sqlalchemy.orm import Session
 from .core import database, add_job, list_jobs, set_status, list_rejected, list_status_events, save_profile, Profile
 from .theme import DARK_STYLESHEET
 from .career import CareerDocument, TextSnippet, extract_document, save_document, list_documents, save_snippet, list_snippets, update_snippet, delete_snippet, update_document, delete_document
 from .core import Base
 from .entries import CareerEntry, KINDS, entries, save_entry, remove_entry
-from .mailer import MailLog, load_settings, save_settings, send_mail, log_mail, mail_history
+from .mailer import MailLog, load_settings, save_settings, test_connection, send_mail, log_mail, mail_history
 
 class JobDialog(QDialog):
     def __init__(self, parent=None):
@@ -468,9 +469,17 @@ class MainWindow(QMainWindow):
 
     def mail_studio(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("JobHunter | Sicherer SMTP-Mailer")
-        dialog.resize(900, 760)
-        layout = QVBoxLayout(dialog)
+        dialog.setWindowTitle("JobHunter | Application Mailer")
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowType.WindowMinMaxButtonsHint)
+        screen = QApplication.primaryScreen().availableGeometry()
+        dialog.resize(min(950, screen.width() - 80), min(780, screen.height() - 80))
+        outer = QVBoxLayout(dialog)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        outer.addWidget(scroll)
+        panel = QWidget()
+        scroll.setWidget(panel)
+        layout = QVBoxLayout(panel)
         heading = QLabel("✉  APPLICATION MAILER")
         heading.setObjectName("hero")
         layout.addWidget(heading)
@@ -485,41 +494,71 @@ class MainWindow(QMainWindow):
         sender = QLineEdit(settings.get("sender", ""))
         password = QLineEdit()
         password.setEchoMode(QLineEdit.EchoMode.Password)
-        password.setPlaceholderText("Leer lassen, um gespeichertes Passwort beizubehalten")
+        password.setPlaceholderText("Leer lassen, um vorhandenes Passwort zu verwenden")
         signature = QTextEdit(settings.get("signature", ""))
-        signature.setMaximumHeight(85)
-        for label, widget in [("SMTP-Host", host), ("Port", port), ("Verschlüsselung", security),
-                              ("Benutzername", username), ("Absenderadresse", sender),
-                              ("SMTP-Passwort / App-Passwort", password), ("Signatur", signature)]:
+        signature.setFixedHeight(85)
+        config_fields = [host, port, security, username, sender, password, signature]
+        for label, widget in [("SMTP-Host", host), ("Port", port), ("TLS-Modus", security),
+                              ("Benutzername", username), ("Absender", sender),
+                              ("SMTP-/App-Passwort", password), ("Signatur", signature)]:
             config.addRow(label, widget)
         layout.addLayout(config)
         def current_settings():
             return dict(host=host.text().strip(), port=port.text().strip(),
                         security=security.currentText(), username=username.text().strip(),
                         sender=sender.text().strip(), signature=signature.toPlainText())
+        verified = bool(settings.get("verified", False))
+        state = QLabel()
+        state.setObjectName("subtitle")
+        actions = QHBoxLayout()
+        save_button = QPushButton("Verbindung prüfen und speichern")
+        save_button.setObjectName("primary")
+        edit_button = QPushButton("Einstellungen ändern")
+        actions.addWidget(save_button)
+        actions.addWidget(edit_button)
+        layout.addLayout(actions)
+        layout.addWidget(state)
+        def lock_config(locked):
+            for field in config_fields:
+                field.setEnabled(not locked)
+            save_button.setEnabled(not locked)
+            edit_button.setEnabled(locked)
+            state.setText("✓ SMTP geprüft und Einstellungen gesperrt" if locked
+                          else "SMTP-Einstellungen bearbeiten und Verbindung prüfen")
         def store():
             try:
-                save_settings(current_settings(), password.text() or None)
+                cfg = current_settings()
+                save_button.setEnabled(False)
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                try:
+                    test_connection(cfg, password.text() or None)
+                finally:
+                    QApplication.restoreOverrideCursor()
+                    save_button.setEnabled(True)
+                cfg["verified"] = True
+                save_settings(cfg, password.text() or None)
                 password.clear()
-                QMessageBox.information(dialog, "Gespeichert", "SMTP-Konfiguration gespeichert. Passwort liegt im Betriebssystem-Schlüsselspeicher.")
+                lock_config(True)
+                QMessageBox.information(dialog, "SMTP geprüft", "TLS und Anmeldung erfolgreich. Einstellungen gespeichert und gesperrt.")
             except Exception as exc:
-                QMessageBox.warning(dialog, "Konfiguration", str(exc))
-        save_button = QPushButton("SMTP-Einstellungen und Signatur speichern")
+                QMessageBox.warning(dialog, "SMTP-Prüfung fehlgeschlagen", f"{type(exc).__name__}: {exc}")
         save_button.clicked.connect(store)
-        layout.addWidget(save_button)
-        layout.addWidget(QLabel("NACHRICHT  •  Empfänger und Anhänge vor Versand prüfen"))
+        edit_button.clicked.connect(lambda: lock_config(False))
+        # A previous verified flag is not proof that the current account still works.
+        lock_config(verified)
+        layout.addWidget(QLabel("NACHRICHT  •  Vor dem Versand kontrollieren"))
         form = QFormLayout()
         recipient = QLineEdit()
         subject = QLineEdit()
         body = QTextEdit()
-        body.setPlaceholderText("Bewerbungstext eingeben ...")
-        body.setMinimumHeight(110)
+        body.setPlaceholderText("Nachricht eingeben ...")
+        body.setMinimumHeight(145)
         form.addRow("An", recipient)
         form.addRow("Betreff", subject)
         form.addRow("Nachricht", body)
         layout.addLayout(form)
         attachments = QListWidget()
-        attachments.setMaximumHeight(90)
+        attachments.setMinimumHeight(90)
         layout.addWidget(attachments)
         attachment_paths = []
         controls = QHBoxLayout()
@@ -545,22 +584,23 @@ class MainWindow(QMainWindow):
             return text + ("\\n\\n" + sig if sig else "")
         def send():
             from .mailer import build_message
-            from PySide6.QtCore import QTimer
             try:
+                if not save_button.isEnabled() and not edit_button.isEnabled():
+                    raise ValueError("SMTP-Konfiguration ist nicht bereit.")
+                if not edit_button.isEnabled():
+                    raise ValueError("Bitte SMTP-Einstellungen zuerst prüfen und speichern.")
                 cfg = current_settings()
-                message = build_message(cfg["sender"], recipient.text(), subject.text(),
-                                        compose(), attachment_paths)
+                build_message(cfg["sender"], recipient.text(), subject.text(), compose(), attachment_paths)
                 summary = (f"Von: {cfg['sender']}\\nAn: {recipient.text()}\\n"
                            f"Betreff: {subject.text()}\\nAnhänge: "
                            f"{', '.join(Path(p).name for p in attachment_paths) or 'keine'}"
                            f"\\n\\n{compose()}")
-                preview = QMessageBox.question(dialog, "Versand bestätigen", summary,
-                                               QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                               QMessageBox.StandardButton.No)
-                if preview != QMessageBox.StandardButton.Yes:
+                if QMessageBox.question(dialog, "Versand bestätigen", summary,
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
                     return
                 send_button.setEnabled(False)
-                QApplication.setOverrideCursor(__import__("PySide6.QtCore", fromlist=["Qt"]).Qt.CursorShape.WaitCursor)
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                 try:
                     send_mail(cfg, recipient.text(), subject.text(), compose(), attachment_paths)
                 finally:
@@ -569,18 +609,16 @@ class MainWindow(QMainWindow):
                 log_mail(self.engine, recipient.text(), subject.text(), "sent")
                 QMessageBox.information(dialog, "Versendet", "SMTP-Server hat die Nachricht angenommen.")
             except Exception as exc:
-                # Avoid persisting SMTP server responses: they can contain sensitive details.
                 log_mail(self.engine, recipient.text(), subject.text(), "failed", type(exc).__name__)
                 QMessageBox.warning(dialog, "Versand fehlgeschlagen", f"{type(exc).__name__}: {exc}")
         send_button = QPushButton("✉ Nachricht prüfen und senden")
         send_button.setObjectName("primary")
         send_button.clicked.connect(send)
-        layout.addWidget(send_button)
-        history = mail_history(self.engine)
+        outer.addWidget(send_button)
         layout.addWidget(QLabel("LETZTE VERSANDVERSUCHE"))
         logview = QListWidget()
-        logview.setMaximumHeight(90)
-        for date, to, subj, status in history:
+        logview.setMinimumHeight(95)
+        for date, to, subj, status in mail_history(self.engine):
             logview.addItem(f"{date[:19]}  |  {status.upper()}  |  {to}  |  {subj}")
         layout.addWidget(logview)
         dialog.exec()
