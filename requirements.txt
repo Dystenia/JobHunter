@@ -7,3 +7,4 @@ PyMuPDF>=1.24,<2
 Pillow>=10,<13
 pytesseract>=0.3.13,<1
 pytest>=8,<10
+keyring>=25,<27
