@@ -53,7 +53,7 @@ class ProfileDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.engine = database()
+        self.engine = database(Path(__file__).resolve().parent.parent / 'jobhunter.db')
         Base.metadata.create_all(self.engine)
         self.setWindowTitle("JobHunter — Application Studio")
         self.setWindowIcon(QApplication.instance().windowIcon())
@@ -233,10 +233,13 @@ class MainWindow(QMainWindow):
         upload = QPushButton("＋ Dokument importieren")
         upload.setObjectName("primary")
         edit = QPushButton("Text speichern")
+        transfer = QPushButton("→ Karriereeintrag erstellen")
+        transfer.setObjectName("purple")
         remove = QPushButton("Dokument löschen")
         remove.setObjectName("pink")
         actions.addWidget(upload)
         actions.addWidget(edit)
+        actions.addWidget(transfer)
         actions.addWidget(remove)
         layout.addLayout(actions)
         body = QHBoxLayout()
@@ -313,8 +316,57 @@ class MainWindow(QMainWindow):
                 return
             delete_document(self.engine, records[index][0])
             refresh_docs()
+        def transfer_to_career():
+            index = items.currentRow()
+            if index < 0 or index >= len(records):
+                QMessageBox.information(dialog, "Auswahl", "Bitte zuerst ein Quelldokument auswählen.")
+                return
+            source_id, filename, _, stored_text = records[index]
+            # A text selection becomes the draft; otherwise the full currently edited text.
+            selection = preview.textCursor().selectedText().replace("\\u2029", "\\n").strip()
+            draft_text = selection or preview.toPlainText().strip()
+            if not draft_text:
+                QMessageBox.warning(dialog, "Keine Daten", "Der Dokumenttext ist leer.")
+                return
+            form_dialog = QDialog(dialog)
+            form_dialog.setWindowTitle("Karriereeintrag aus Dokument — Entwurf")
+            form_dialog.resize(760, 530)
+            form = QFormLayout(form_dialog)
+            kind = QComboBox()
+            kind.addItems(KINDS)
+            title = QLineEdit()
+            title.setPlaceholderText("Berufsbezeichnung, Abschluss oder Zertifikat")
+            org = QLineEdit()
+            period = QLineEdit()
+            details = QTextEdit()
+            details.setPlainText(draft_text)
+            form.addRow("Quelle", QLabel(f"{filename} (Dokument #{source_id})"))
+            form.addRow("Kategorie", kind)
+            form.addRow("Bezeichnung", title)
+            form.addRow("Arbeitgeber / Institution", org)
+            form.addRow("Zeitraum", period)
+            form.addRow("Text aus Quelle", details)
+            form.addRow(QLabel("Der Eintrag wird ungeprüft gespeichert und muss später bestätigt werden."))
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save |
+                                       QDialogButtonBox.StandardButton.Cancel)
+            form.addRow(buttons)
+            def persist_draft():
+                try:
+                    save_entry(self.engine, kind.currentText(), title.text(), org.text(),
+                               period.text(), details.toPlainText(), verified=False,
+                               source_document_id=source_id)
+                except ValueError as exc:
+                    QMessageBox.warning(form_dialog, "Eingabe", str(exc))
+                    return
+                form_dialog.accept()
+            buttons.accepted.connect(persist_draft)
+            buttons.rejected.connect(form_dialog.reject)
+            if form_dialog.exec() == QDialog.DialogCode.Accepted:
+                status.setText("Karriereentwurf gespeichert. Unter Karriere-Daten prüfen und bestätigen.")
+
         upload.clicked.connect(upload_doc)
         edit.clicked.connect(save_text)
+        transfer.clicked.connect(transfer_to_career)
         remove.clicked.connect(remove_doc)
         refresh_docs()
         dialog.exec()
